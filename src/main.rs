@@ -1,28 +1,45 @@
-use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
+#![deny(clippy::all)]
 
-#[get("/")]
-async fn hello() -> impl Responder {
-    HttpResponse::Ok().body("Hello world!")
-}
+// #[macro_use]
+extern crate diesel;
 
-#[post("/echo")]
-async fn echo(req_body: String) -> impl Responder {
-    HttpResponse::Ok().body(req_body)
-}
+use actix_web::{middleware::Logger, web::Data, App, HttpServer};
+use diesel::{
+    prelude::*,
+    r2d2::{self, ConnectionManager},
+};
 
-async fn manual_hello() -> impl Responder {
-    HttpResponse::Ok().body("Hey there!")
-}
+mod api;
+mod repository;
+mod services;
+mod types;
+
+use api::{post::routes_posts, test::routes_tests};
+// use repository::*;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    HttpServer::new(|| {
+    // initiate logger
+    dotenv::dotenv().ok();
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
+
+    // set up database connection pool
+    let conn_spec = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+    let manager = ConnectionManager::<PgConnection>::new(conn_spec);
+    let pool = r2d2::Pool::builder()
+        .build(manager)
+        .expect("Failed to create pool.");
+
+    log::info!("starting HTTP server at http://localhost:80");
+
+    HttpServer::new(move || {
         App::new()
-            .service(hello)
-            .service(echo)
-            .route("/hey", web::get().to(manual_hello))
+            .app_data(Data::new(pool.clone()))
+            .wrap(Logger::default())
+            .service(routes_tests())
+            .service(routes_posts())
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(("127.0.0.1", 80))?
     .run()
     .await
 }
